@@ -1,0 +1,6 @@
+{
+  "name": "Dimensional Physics - Dark Forest & 4D Tech Demos",
+  "description": "Interactive 3D/4D visual tech demo exploring adjacent dimensions, hypercubes, dimensional collapse, and Sophon unfolding based on Remembrance of Earth's Past.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
