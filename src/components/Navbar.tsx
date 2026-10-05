@@ -1,7 +1,7 @@
 import React from 'react';
 import { DemoId } from '../types';
 import { playClickSound } from '../utils/sound';
-import { Layers, Sparkles, Rocket, Sliders } from 'lucide-react';
+import { Layers, Sparkles, Rocket, Sliders, Volume2, VolumeX, BookOpen } from 'lucide-react';
 
 interface NavbarProps {
   currentDemo: DemoId;
@@ -31,6 +31,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentDemo,
   onSelectDemo,
   soundEnabled,
+  onToggleSound,
+  onOpenDrawer,
 }) => {
   return (
     <header className="sticky top-0 z-50 w-full bg-slate-950/90 border-b border-cyan-500/30 backdrop-blur-xl px-4 py-3 shadow-2xl">
@@ -52,14 +54,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
+        <div className="flex items-center gap-2 max-w-full min-w-0">
         {/* Demo Switcher Tabs */}
-        <nav className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 shadow-inner overflow-x-auto max-w-full">
+        <nav aria-label="Demos" className="flex items-center gap-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800 shadow-inner overflow-x-auto max-w-full">
           {DEMOS.map((demo) => {
             const Icon = demo.icon;
             const isActive = currentDemo === demo.id;
             return (
               <button
                 key={demo.id}
+                aria-current={isActive ? 'page' : undefined}
                 onClick={() => {
                   onSelectDemo(demo.id);
                   playClickSound(soundEnabled);
@@ -79,6 +83,35 @@ export const Navbar: React.FC<NavbarProps> = ({
             );
           })}
         </nav>
+
+        {onOpenDrawer && (
+          <button
+            onClick={() => {
+              onOpenDrawer();
+              playClickSound(soundEnabled);
+            }}
+            className="p-2 rounded-xl bg-slate-900/90 border border-slate-800 text-slate-400 hover:text-cyan-300 hover:border-cyan-500/40 flex-shrink-0"
+            title="Explain this demo"
+            aria-label="Explain this demo"
+          >
+            <BookOpen className="w-4 h-4" />
+          </button>
+        )}
+
+        {onToggleSound && (
+          <button
+            onClick={onToggleSound}
+            className={`p-2 rounded-xl bg-slate-900/90 border flex-shrink-0 ${
+              soundEnabled ? 'border-cyan-500/40 text-cyan-300' : 'border-slate-800 text-slate-500'
+            } hover:text-cyan-200`}
+            title={soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+            aria-label={soundEnabled ? 'Mute sound effects' : 'Enable sound effects'}
+            aria-pressed={soundEnabled}
+          >
+            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
+          </button>
+        )}
+        </div>
       </div>
     </header>
   );

@@ -25,7 +25,7 @@ export const TheorySidebar: React.FC<TheorySidebarProps> = () => {
       icon: '1D',
       color: 'text-cyan-400 border-cyan-500/40 bg-cyan-950/20',
       summary: 'Movement restricted to forward and backward along a line.',
-      details: 'In String Theory, fundamental constituents of matter are not point particles, but 1D Planck-length (about 10^-35 meters) vibrating strings. A string\'s resonant harmonic modes dictate its observable mass, charge, and spin in higher dimensions.',
+      details: 'In String Theory, fundamental constituents of matter are not point particles, but 1D Planck-length (about 10⁻³⁵ meters) vibrating strings. A string\'s resonant harmonic modes dictate its observable mass, charge, and spin in higher dimensions.',
     },
     {
       id: '2d',
@@ -61,7 +61,7 @@ export const TheorySidebar: React.FC<TheorySidebarProps> = () => {
       icon: 'N-D',
       color: 'text-rose-400 border-rose-500/40 bg-rose-950/20',
       summary: 'Curled extra dimensions existing at every subatomic point.',
-      details: 'Visualizing extra dimensions: Imagine looking at a tightrope from far away—it looks like a 1D line. But an ant crawling on it sees a 2D circular cylinder wrapped around it! In M-Theory and Superstring Theory, our 3D universe contains 6 to 7 extra spatial dimensions curled up at every single point in space into microscopic 6-dimensional Calabi-Yau shapes at the Planck scale (10^-35 meters). Fundamental particles are actually 1D vibrating strings whose harmonic ripples bounce through these 11 dimensions, creating all known subatomic forces.',
+      details: 'Visualizing extra dimensions: Imagine looking at a tightrope from far away—it looks like a 1D line. But an ant crawling on it sees a 2D circular cylinder wrapped around it! Superstring theory needs 10 spacetime dimensions and M-theory needs 11, so beyond our 3 space + 1 time there are 6 or 7 extra spatial dimensions, curled up at every point of space at roughly the Planck scale (10⁻³⁵ meters). In superstring theory the 6 extra dimensions typically form a Calabi-Yau shape. In these theories, fundamental particles are 1D vibrating strings whose vibration patterns are shaped by those hidden dimensions, which is why they show up as different particles and forces. None of this has been experimentally confirmed yet.',
     },
   ];
 

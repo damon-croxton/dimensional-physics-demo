@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ReferenceCube3D } from './ReferenceCube3D';
 import { playClickSound, playShiftSound } from '../utils/sound';
-import { Eye, Layers, Orbit, Sparkles, Sliders, Info, ShieldCheck, CheckCircle2, AlertCircle } from 'lucide-react';
+import { attachDragRotate, createRenderer, disposeObject3D, observeResize, teardownRenderer } from '../utils/three';
+import { Eye, Layers, Sparkles, Sliders, Info, ShieldCheck, CheckCircle2 } from 'lucide-react';
 
 interface Demo1Props {
   soundEnabled: boolean;
@@ -17,6 +18,9 @@ const FACES_4D = [
   { id: 'bottom', name: 'Bottom Face', color: '#eab308', normal: [0, -1, 0], label: '-Y (Bottom)' },
   { id: 'core', name: 'Internal Core', color: '#f59e0b', normal: [0, 0, 0], label: 'Internal Core' },
 ];
+
+// Where the 4D vantage-point marker sits; all sight rays start here.
+const OBSERVER_POS = new THREE.Vector3(0, 3.8, 0);
 
 export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -34,20 +38,15 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(0, 3.2, 6.2);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
+    const renderer = createRenderer(container);
+    const stopResize = observeResize(container, camera, renderer);
 
     // Ambient & Directional Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
@@ -114,7 +113,7 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
 
       // Bright white edge highlighting
       const edgesGeo = new THREE.EdgesGeometry(planeGeo);
-      const edgesMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+      const edgesMat = new THREE.LineBasicMaterial({ color: 0xffffff });
       const edges = new THREE.LineSegments(edgesGeo, edgesMat);
       mesh.add(edges);
 
@@ -142,49 +141,47 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
       emissiveIntensity: 1.2,
     });
     const eyeMesh = new THREE.Mesh(eyeGeo, eyeMat);
-    eyeMesh.position.set(0, 3.8, 0);
+    eyeMesh.position.copy(OBSERVER_POS);
     scene.add(eyeMesh);
 
     // Orbit Dragging
-    let isDragging = false;
-    let prevMousePos = { x: 0, y: 0 };
-
-    const handleMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      prevMousePos = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const dx = e.clientX - prevMousePos.x;
-      const dy = e.clientY - prevMousePos.y;
-
+    const drag = attachDragRotate(renderer.domElement, (dx, dy) => {
       facesGroup.rotation.y += dx * 0.008;
       facesGroup.rotation.x += dy * 0.008;
-
-      prevMousePos = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseUp = () => {
-      isDragging = false;
-    };
-
-    const domElem = renderer.domElement;
-    domElem.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    });
 
     // Animation loop
     let animId: number;
+    const rayTarget = new THREE.Vector3();
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
 
-      if (!isDragging) {
+      if (!drag.isDragging()) {
         facesGroup.rotation.y += 0.004;
       }
 
       particles.rotation.y += 0.001;
+
+      // The faces keep spinning, so re-aim each sight ray at its face's
+      // current world position instead of where it was when the ray was built.
+      if (rayLinesGroup.children.length > 0) {
+        facesGroup.updateMatrixWorld();
+        rayLinesGroup.children.forEach((obj) => {
+          const line = obj as THREE.Line;
+          const target = line.userData.target as THREE.Object3D | undefined;
+          if (!target) return;
+          target.getWorldPosition(rayTarget);
+          const pos = line.geometry.attributes.position as THREE.BufferAttribute;
+          pos.setXYZ(1, rayTarget.x, rayTarget.y, rayTarget.z);
+          pos.needsUpdate = true;
+          // Update the dash distances in place; computeLineDistances() would
+          // allocate a fresh GPU buffer every frame.
+          const dist = line.geometry.attributes.lineDistance as THREE.BufferAttribute;
+          dist.setX(1, OBSERVER_POS.distanceTo(rayTarget));
+          dist.needsUpdate = true;
+        });
+      }
       if (coreMeshRef.current) {
         coreMeshRef.current.rotation.y += 0.01;
       }
@@ -194,27 +191,11 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
 
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    window.addEventListener('resize', handleResize);
-
     return () => {
       cancelAnimationFrame(animId);
-      domElem.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('resize', handleResize);
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
+      drag.dispose();
+      stopResize();
+      teardownRenderer(container, renderer, scene);
     };
   }, []);
 
@@ -289,12 +270,13 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
     // Rebuild 4D Sight Rays (Only visible in 4D mode with wOffset > 0)
     const rayLinesGroup = rayLinesGroupRef.current;
     if (rayLinesGroup && sceneRef.current) {
-      while (rayLinesGroup.children.length > 0) {
-        rayLinesGroup.remove(rayLinesGroup.children[0]);
-      }
+      // Free the previous rays' buffers before rebuilding; this effect runs on
+      // every slider tick.
+      disposeObject3D(rayLinesGroup);
+      rayLinesGroup.clear();
 
       if (mode4D && wOffset > 0) {
-        const observerPos = new THREE.Vector3(0, 3.8, 0);
+        const observerPos = OBSERVER_POS.clone();
 
         facesGroup.children.forEach((child) => {
           if (!child.visible) return;
@@ -312,6 +294,7 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
           });
           const line = new THREE.Line(geometry, mat);
           line.computeLineDistances();
+          line.userData.target = child;
           rayLinesGroup.add(line);
         });
       }
@@ -463,7 +446,7 @@ export const Demo1_SimultaneousVision: React.FC<Demo1Props> = ({ soundEnabled })
               className="w-full accent-cyan-400 bg-slate-800 rounded h-2 cursor-pointer"
             />
             <p className="text-[10px] text-slate-400 leading-tight">
-              Translates all 6 faces outwards along their 4D orthogonal normal vectors, exposing the internal core volume.
+              Pulls all 6 faces apart along their normals. This exploded view is a 3D stand-in for what a 4D observer gets for free: every face and the core in view at once, none blocking another.
             </p>
           </div>
 

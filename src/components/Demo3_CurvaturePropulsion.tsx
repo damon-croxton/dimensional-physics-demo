@@ -2,7 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ReferenceCube3D } from './ReferenceCube3D';
 import { playClickSound, playShiftSound } from '../utils/sound';
-import { Rocket, Sliders, Sparkles, Orbit, Compass, AlertTriangle, ShieldCheck, Info, RefreshCw } from 'lucide-react';
+import { attachDragRotate, createRenderer, observeResize, teardownRenderer } from '../utils/three';
+import { Rocket, Sliders, Sparkles, Compass, Info } from 'lucide-react';
 
 interface Demo3Props {
   soundEnabled: boolean;
@@ -28,11 +29,16 @@ function createLabelSprite(text: string, color: string): THREE.Sprite {
   ctx.fillText(text, 256, 64);
 
   const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
+  texture.colorSpace = THREE.SRGBColorSpace;
   const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false });
   const sprite = new THREE.Sprite(spriteMat);
   sprite.scale.set(2.8, 0.7, 1);
   return sprite;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }
 
 export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }) => {
@@ -45,6 +51,11 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
   const [isEngineActive, setIsEngineActive] = useState<boolean>(true);
   const [showAnalogy, setShowAnalogy] = useState<boolean>(true);
 
+  // The render loop reads the live control values through this ref, so moving
+  // a slider never has to tear down and rebuild the WebGL scene.
+  const paramsRef = useRef({ curvaturePower, lightSpeedFactor, isEngineActive });
+  paramsRef.current = { curvaturePower, lightSpeedFactor, isEngineActive };
+
   const sceneRef = useRef<THREE.Scene | null>(null);
   const gridMeshRef = useRef<THREE.Mesh | null>(null);
   const shipGroupRef = useRef<THREE.Group | null>(null);
@@ -56,20 +67,15 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(0, 4.5, 9.5);
     camera.lookAt(0, 0, 0);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
+    const renderer = createRenderer(container);
+    const stopResize = observeResize(container, camera, renderer);
 
     // Ambient & Point Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
@@ -204,13 +210,13 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     scene.add(photonsGroup);
 
     const photonCount = 120;
+    const pGeo = new THREE.SphereGeometry(0.05, 8, 8);
+    const pMat = new THREE.MeshStandardMaterial({
+      color: 0x38bdf8,
+      emissive: 0x38bdf8,
+      emissiveIntensity: 2.0,
+    });
     for (let i = 0; i < photonCount; i++) {
-      const pGeo = new THREE.SphereGeometry(0.05, 8, 8);
-      const pMat = new THREE.MeshStandardMaterial({
-        color: 0x38bdf8,
-        emissive: 0x38bdf8,
-        emissiveIntensity: 2.0,
-      });
       const pMesh = new THREE.Mesh(pGeo, pMat);
       pMesh.position.set(
         (Math.random() - 0.5) * 6,
@@ -221,33 +227,30 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     }
 
     // Drag Orbit
-    let isDragging = false;
-    let prevMouse = { x: 0, y: 0 };
-
-    const handleMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      prevMouse = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const dx = e.clientX - prevMouse.x;
-      const dy = e.clientY - prevMouse.y;
-
+    const drag = attachDragRotate(renderer.domElement, (dx, dy) => {
       scene.rotation.y += dx * 0.008;
       scene.rotation.x += dy * 0.008;
+    });
 
-      prevMouse = { x: e.clientX, y: e.clientY };
+    // Carve the curvature trough into the grid behind the ship. The plane is
+    // rotated +90deg about X, so local +Y is world +Z and local +Z is world -Y
+    // (positive local z pushes the grid down). The trough fades in smoothly
+    // aft of the engine and deepens with drive power.
+    let gridKey = '';
+    const deformGrid = (power: number, active: boolean) => {
+      const key = `${power}:${active}`;
+      if (key === gridKey) return;
+      gridKey = key;
+      const attr = gridMesh.geometry.attributes.position as THREE.BufferAttribute;
+      const positions = attr.array as Float32Array;
+      for (let i = 0; i < attr.count; i++) {
+        const x = positions[i * 3];
+        const worldZ = positions[i * 3 + 1];
+        const onset = smoothstep(0.6, -1.5, worldZ);
+        positions[i * 3 + 2] = active ? (power / 100) * 1.2 * Math.exp(-0.3 * Math.abs(x)) * onset : 0;
+      }
+      attr.needsUpdate = true;
     };
-
-    const handleMouseUp = () => {
-      isDragging = false;
-    };
-
-    const domElem = renderer.domElement;
-    domElem.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
 
     // Animation Loop
     let animId: number;
@@ -255,37 +258,22 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     const animate = () => {
       animId = requestAnimationFrame(animate);
 
-      if (!isDragging) {
+      const { curvaturePower, lightSpeedFactor, isEngineActive } = paramsRef.current;
+
+      if (!drag.isDragging()) {
         scene.rotation.y += 0.003;
       }
 
       // Pulse engine core
       engineRing.rotation.z += 0.02;
 
-      // Animate spacetime grid curvature depression behind ship
-      if (gridMeshRef.current) {
-        const positions = gridMeshRef.current.geometry.attributes.position.array as Float32Array;
-        const count = positions.length / 3;
-
-        for (let i = 0; i < count; i++) {
-          const z = positions[i * 3 + 1]; // Plane Y in local geo = Z in world
-          const x = positions[i * 3];
-
-          if (z < 0 && isEngineActive) {
-            // Depression factor proportional to curvature power
-            const dep = (curvaturePower / 100) * 1.2 * Math.exp(-0.3 * Math.abs(x));
-            positions[i * 3 + 2] = -dep; // Z offset in local geometry
-          } else {
-            positions[i * 3 + 2] = 0;
-          }
-        }
-        gridMeshRef.current.geometry.attributes.position.needsUpdate = true;
-      }
+      // Spacetime grid trough behind the ship (only rewritten when it changes)
+      deformGrid(curvaturePower, isEngineActive);
 
       // Move photons along Z with speed scaled by local light speed factor
       if (photonsGroupRef.current) {
         photonsGroupRef.current.children.forEach((child) => {
-          const inWake = child.position.z < -0.5; // Behind ship engine ring in flattened wake
+          const inWake = isEngineActive && child.position.z < -0.5; // Behind ship engine ring in flattened wake
           // In front (unwarped space): normal fast speed (0.18)
           // In trailing wake (flattened space): lowered speed scaled directly by lightSpeedFactor %
           const currentSpeed = inWake
@@ -305,29 +293,13 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
 
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    window.addEventListener('resize', handleResize);
-
     return () => {
       cancelAnimationFrame(animId);
-      domElem.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('resize', handleResize);
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
+      drag.dispose();
+      stopResize();
+      teardownRenderer(container, renderer, scene);
     };
-  }, [isEngineActive, curvaturePower, lightSpeedFactor]);
+  }, []);
 
   // Update Dynamic Materials based on light speed reduction & Black Domain
   useEffect(() => {
@@ -336,6 +308,7 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     }
 
     if (wakeMeshRef.current) {
+      wakeMeshRef.current.visible = isEngineActive;
       const mat = wakeMeshRef.current.material as THREE.MeshStandardMaterial;
       if (lightSpeedFactor <= 10 || isBlackDomain) {
         // Black Domain colors (deep dark event horizon)
@@ -352,7 +325,7 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
     if (blackDomainMeshRef.current) {
       blackDomainMeshRef.current.visible = isBlackDomain || lightSpeedFactor <= 8;
     }
-  }, [lightSpeedFactor, curvaturePower, isBlackDomain, showGridLines]);
+  }, [lightSpeedFactor, curvaturePower, isBlackDomain, showGridLines, isEngineActive]);
 
   return (
     <div className="relative w-full h-full min-h-[620px] flex flex-col lg:flex-row gap-4 p-4 text-slate-100 bg-slate-950 font-sans">
@@ -363,32 +336,32 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
           <div className="flex items-center gap-2 bg-slate-900/90 border border-cyan-500/40 px-3 py-1.5 rounded-xl backdrop-blur-md shadow-lg">
             <Rocket className="w-4 h-4 text-cyan-400 animate-pulse" />
             <span className="font-mono text-xs font-bold uppercase tracking-wider text-cyan-200">
-              Curvature Propulsion & Light-Speed Reduction Viewport
+              Curvature Propulsion Viewport
             </span>
-            <span className="bg-cyan-950 text-cyan-300 border border-cyan-700 text-[10px] px-2 py-0.5 rounded font-mono">
+            <span className="hidden xl:inline bg-cyan-950 text-cyan-300 border border-cyan-700 text-[10px] px-2 py-0.5 rounded font-mono">
               FTL Spacetime Wake
             </span>
           </div>
           <p className="text-[11px] font-mono text-slate-300 bg-black/70 px-3 py-1.5 rounded-xl border border-slate-800 backdrop-blur max-w-md">
-            As the Curvature Drive flattens spacetime behind the vessel, local light speed ($c$) drops drastically, creating a trailing wake that pulls the ship forward like a soap-boat on water.
+            As the Curvature Drive flattens spacetime behind the vessel, the local speed of light (c) drops drastically, creating a trailing wake that pulls the ship forward like a soap-boat on water.
           </p>
         </div>
 
         {/* State Badge */}
         <div className="absolute top-4 right-4 z-10 bg-slate-900/90 border border-slate-700/80 px-3 py-1.5 rounded-xl backdrop-blur text-xs font-mono text-cyan-300 flex items-center gap-2 shadow-lg">
           <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-          <span>Local Wake $c$: <strong className="text-white font-bold">{lightSpeedFactor}% of $c$</strong> ({(lightSpeedFactor * 3000).toLocaleString()} km/s)</span>
+          <span>Local wake c: <strong className="text-white font-bold">{lightSpeedFactor}% of c</strong> ({(lightSpeedFactor * 2998).toLocaleString()} km/s)</span>
         </div>
 
         {/* 3D Viewport Visual HUD Annotations */}
         <div className="absolute bottom-16 left-4 z-10 hidden sm:flex flex-col gap-2 pointer-events-none">
           <div className="bg-slate-950/80 border border-emerald-500/40 px-3 py-1.5 rounded-lg text-[10px] font-mono text-emerald-300 flex items-center gap-1.5 backdrop-blur shadow-lg">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>▲ FRONT (NOSE): Pointing Forward into Unwarped Space (Fast Photons, $c = 100\%$)</span>
+            <span>▲ FRONT (NOSE): Pointing Forward into Unwarped Space (Fast Photons, c = 100%)</span>
           </div>
           <div className="bg-slate-950/80 border border-cyan-500/40 px-3 py-1.5 rounded-lg text-[10px] font-mono text-cyan-300 flex items-center gap-1.5 backdrop-blur shadow-lg">
             <span className="w-2.5 h-2.5 rounded-full bg-orange-400" />
-            <span>▼ REAR (ENGINE WAKE): Trailing Flattened Space (Photons SLOW DOWN to {lightSpeedFactor}% $c$)</span>
+            <span>▼ REAR (ENGINE WAKE): Trailing Flattened Space (Photons SLOW DOWN to {lightSpeedFactor}% c)</span>
           </div>
         </div>
 
@@ -548,7 +521,7 @@ export const Demo3_CurvaturePropulsion: React.FC<Demo3Props> = ({ soundEnabled }
           {/* Slider: Local Speed of Light Reduction */}
           <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-800">
             <div className="flex justify-between text-xs font-mono">
-              <span className="text-slate-300">Trailing Light Speed ($c$)</span>
+              <span className="text-slate-300">Trailing Light Speed (c)</span>
               <span className="text-amber-400 font-bold">{lightSpeedFactor}% c</span>
             </div>
             <input

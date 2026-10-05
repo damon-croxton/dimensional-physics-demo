@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Eye, Lock, Maximize2, RotateCcw } from 'lucide-react';
+import { Eye, Lock } from 'lucide-react';
+import { attachDragRotate, createRenderer, observeResize, teardownRenderer } from '../utils/three';
 
 interface ReferenceCube3DProps {
   highlightFace?: string | null;
@@ -8,39 +9,42 @@ interface ReferenceCube3DProps {
   title?: string;
 }
 
+// BoxGeometry material order: +X, -X, +Y, -Y, +Z, -Z
+const FACE_ORDER = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+const FACE_COLORS = [0xef4444, 0x3b82f6, 0x22c55e, 0xeab308, 0xa855f7, 0x06b6d4];
+const FACE_NORMALS = [
+  new THREE.Vector3(1, 0, 0),
+  new THREE.Vector3(-1, 0, 0),
+  new THREE.Vector3(0, 1, 0),
+  new THREE.Vector3(0, -1, 0),
+  new THREE.Vector3(0, 0, 1),
+  new THREE.Vector3(0, 0, -1),
+];
+const HALF_SIZE = 0.6;
+
 export const ReferenceCube3D: React.FC<ReferenceCube3DProps> = ({
   highlightFace,
   className = '',
   title = 'Standard 3D Space (Reference)',
 }) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const materialsRef = useRef<THREE.MeshStandardMaterial[]>([]);
   const [visibleCount, setVisibleCount] = useState<number>(3);
-  const [isHovered, setIsHovered] = useState(false);
 
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth || 220;
-    const height = container.clientHeight || 200;
-
-    // Scene
     const scene = new THREE.Scene();
 
-    // Camera
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 100);
     camera.position.set(2.2, 1.8, 2.8);
     camera.lookAt(0, 0, 0);
 
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
+    const renderer = createRenderer(container);
+    const stopResize = observeResize(container, camera, renderer);
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
     const dirLight1 = new THREE.DirectionalLight(0x38bdf8, 1.2);
     dirLight1.position.set(5, 5, 5);
@@ -50,149 +54,95 @@ export const ReferenceCube3D: React.FC<ReferenceCube3DProps> = ({
     dirLight2.position.set(-5, -5, -5);
     scene.add(dirLight2);
 
-    // Standard 3D Cube Group
     const cubeGroup = new THREE.Group();
     scene.add(cubeGroup);
 
-    // Create 6 distinct colored faces
-    const faceColors = [
-      0xef4444, // Right - Red
-      0x3b82f6, // Left - Blue
-      0x22c55e, // Top - Green
-      0xeab308, // Bottom - Yellow
-      0xa855f7, // Front - Purple
-      0x06b6d4, // Back - Cyan
-    ];
-
-    const materials = faceColors.map(color => new THREE.MeshStandardMaterial({
+    // Fully opaque, front-side-only faces: this is the 3D baseline, so the
+    // faces must genuinely hide the back of the cube and its core.
+    const materials = FACE_COLORS.map((color) => new THREE.MeshStandardMaterial({
       color,
       roughness: 0.3,
       metalness: 0.2,
-      transparent: true,
-      opacity: 0.85,
-      side: THREE.FrontSide, // Crucial: FrontSide means 3D depth blocks rear faces!
+      side: THREE.FrontSide,
     }));
+    materialsRef.current = materials;
 
-    const geometry = new THREE.BoxGeometry(1.2, 1.2, 1.2);
-    const cubeMesh = new THREE.Mesh(geometry, materials);
-    cubeGroup.add(cubeMesh);
+    const geometry = new THREE.BoxGeometry(HALF_SIZE * 2, HALF_SIZE * 2, HALF_SIZE * 2);
+    cubeGroup.add(new THREE.Mesh(geometry, materials));
 
-    // Wireframe outline
-    const wireframeGeo = new THREE.EdgesGeometry(geometry);
-    const wireframeMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
-    const wireframe = new THREE.LineSegments(wireframeGeo, wireframeMat);
+    const wireframe = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geometry),
+      new THREE.LineBasicMaterial({ color: 0xffffff })
+    );
     cubeGroup.add(wireframe);
 
-    // Inner hidden core (invisible in standard 3D without slicing)
-    const coreGeo = new THREE.SphereGeometry(0.35, 16, 16);
-    const coreMat = new THREE.MeshStandardMaterial({
-      color: 0xf59e0b,
-      emissive: 0xd97706,
-      emissiveIntensity: 0.8,
-    });
-    const innerCore = new THREE.Mesh(coreGeo, coreMat);
+    // Inner core: present, but never visible from any 3D vantage point.
+    const innerCore = new THREE.Mesh(
+      new THREE.SphereGeometry(0.35, 16, 16),
+      new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0xd97706, emissiveIntensity: 0.8 })
+    );
     cubeGroup.add(innerCore);
 
-    // Orbit/drag interaction
-    let isDragging = false;
-    let previousMousePosition = { x: 0, y: 0 };
+    const drag = attachDragRotate(renderer.domElement, (dx, dy) => {
+      cubeGroup.rotation.y += dx * 0.01;
+      cubeGroup.rotation.x += dy * 0.01;
+    });
 
-    const handleMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      previousMousePosition = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const deltaX = e.clientX - previousMousePosition.x;
-      const deltaY = e.clientY - previousMousePosition.y;
-
-      cubeGroup.rotation.y += deltaX * 0.01;
-      cubeGroup.rotation.x += deltaY * 0.01;
-
-      previousMousePosition = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseUp = () => {
-      isDragging = false;
-    };
-
-    const domElem = renderer.domElement;
-    domElem.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
-
-    // Animation Loop & Face Visibility Calculation
+    const worldNormal = new THREE.Vector3();
+    const faceCenter = new THREE.Vector3();
+    let lastVisible = -1;
     let animationFrameId: number;
 
     const animate = () => {
       animationFrameId = requestAnimationFrame(animate);
 
-      if (!isDragging) {
+      if (!drag.isDragging()) {
         cubeGroup.rotation.y += 0.006;
         cubeGroup.rotation.x += 0.003;
       }
 
-      // Calculate how many faces are visible to camera in 3D
-      // Normal vectors of box faces
-      const normals = [
-        new THREE.Vector3(1, 0, 0),   // Right
-        new THREE.Vector3(-1, 0, 0),  // Left
-        new THREE.Vector3(0, 1, 0),   // Top
-        new THREE.Vector3(0, -1, 0),  // Bottom
-        new THREE.Vector3(0, 0, 1),   // Front
-        new THREE.Vector3(0, 0, -1),  // Back
-      ];
-
+      // A face is visible when the camera is on the outward side of its plane.
+      // Using the face-to-camera vector (not the view direction) keeps the
+      // count correct under perspective projection.
       let visible = 0;
-      const camDir = new THREE.Vector3();
-      camera.getWorldDirection(camDir);
-      camDir.negate(); // Vector pointing from origin to camera
-
-      normals.forEach((norm) => {
-        const worldNorm = norm.clone().applyQuaternion(cubeGroup.quaternion);
-        if (worldNorm.dot(camDir) > 0.05) {
+      for (const normal of FACE_NORMALS) {
+        worldNormal.copy(normal).applyQuaternion(cubeGroup.quaternion);
+        faceCenter.copy(worldNormal).multiplyScalar(HALF_SIZE);
+        if (worldNormal.dot(faceCenter.subVectors(camera.position, faceCenter)) > 0) {
           visible++;
         }
-      });
+      }
+      // Only touch React state when the value changes, not once per frame.
+      if (visible !== lastVisible) {
+        lastVisible = visible;
+        setVisibleCount(visible);
+      }
 
-      setVisibleCount(visible);
       renderer.render(scene, camera);
     };
 
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    window.addEventListener('resize', handleResize);
-
     return () => {
       cancelAnimationFrame(animationFrameId);
-      domElem.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('resize', handleResize);
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      geometry.dispose();
-      materials.forEach(m => m.dispose());
-      renderer.dispose();
+      drag.dispose();
+      stopResize();
+      teardownRenderer(container, renderer, scene);
+      materialsRef.current = [];
     };
   }, []);
+
+  useEffect(() => {
+    materialsRef.current.forEach((mat, idx) => {
+      const isHighlighted = highlightFace === FACE_ORDER[idx];
+      mat.emissive.setHex(isHighlighted ? 0xffffff : 0x000000);
+      mat.emissiveIntensity = isHighlighted ? 0.45 : 0;
+    });
+  }, [highlightFace]);
 
   return (
     <div
       className={`relative rounded-xl border border-cyan-500/30 bg-slate-950/80 p-3 shadow-xl backdrop-blur-md transition-all ${className}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
     >
       <div className="flex items-center justify-between border-b border-slate-800 pb-2 mb-2">
         <div className="flex items-center gap-2">

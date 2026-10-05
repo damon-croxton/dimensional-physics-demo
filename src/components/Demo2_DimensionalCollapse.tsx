@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ReferenceCube3D } from './ReferenceCube3D';
 import { playClickSound, playCollapseSound } from '../utils/sound';
+import { attachDragRotate, createDicePipTexture, createRenderer, observeResize, teardownRenderer } from '../utils/three';
 import { Play, Pause, RotateCcw, Camera, ShieldAlert, Sparkles, Eye, Info, Sliders } from 'lucide-react';
 
 interface Demo2Props {
@@ -18,68 +19,18 @@ const DICE_FACES = [
   { id: 'core', pips: 0, name: 'Interior Energy Nucleus', color: '#f59e0b', pipColor: '#fcb316', pos3d: [0, 2.5, 0], rot3d: [0, 0, 0], pos2d: [2.4, 0.02, 0] },
 ];
 
-function createDicePipTexture(pipCount: number, bgColor: string): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 256;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d')!;
+// Dice face id -> ReferenceCube3D face name
+const REFERENCE_FACE: Record<string, string> = {
+  f1: 'front',
+  f2: 'top',
+  f3: 'right',
+  f4: 'left',
+  f5: 'bottom',
+  f6: 'back',
+};
 
-  ctx.fillStyle = bgColor;
-  ctx.fillRect(0, 0, 256, 256);
-
-  ctx.strokeStyle = '#ffffff';
-  ctx.lineWidth = 14;
-  ctx.strokeRect(7, 7, 242, 242);
-
-  const r = 26;
-  ctx.fillStyle = '#ffffff';
-
-  const drawPip = (x: number, y: number) => {
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.lineWidth = 4;
-    ctx.strokeStyle = '#000000';
-    ctx.stroke();
-  };
-
-  const c = 128;
-  const l = 70;
-  const h = 186;
-
-  if (pipCount === 1) {
-    drawPip(c, c);
-  } else if (pipCount === 2) {
-    drawPip(l, l);
-    drawPip(h, h);
-  } else if (pipCount === 3) {
-    drawPip(l, l);
-    drawPip(c, c);
-    drawPip(h, h);
-  } else if (pipCount === 4) {
-    drawPip(l, l);
-    drawPip(h, l);
-    drawPip(l, h);
-    drawPip(h, h);
-  } else if (pipCount === 5) {
-    drawPip(l, l);
-    drawPip(h, l);
-    drawPip(c, c);
-    drawPip(l, h);
-    drawPip(h, h);
-  } else if (pipCount === 6) {
-    drawPip(l, l);
-    drawPip(h, l);
-    drawPip(l, c);
-    drawPip(h, c);
-    drawPip(l, h);
-    drawPip(h, h);
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.needsUpdate = true;
-  return texture;
-}
+// Full 3D cube -> flat 2D net takes this long when auto-collapsing.
+const COLLAPSE_DURATION_MS = 2400;
 
 export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }) => {
   const mountRef = useRef<HTMLDivElement>(null);
@@ -87,6 +38,9 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
   const [isCollapsing, setIsCollapsing] = useState<boolean>(false);
   const [cameraMode, setCameraMode] = useState<'3d' | 'top' | 'side'>('3d');
   const [selectedFaceId, setSelectedFaceId] = useState<string | null>('f6');
+
+  const progressRef = useRef(collapseProgress);
+  progressRef.current = collapseProgress;
 
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -99,21 +53,16 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
     const container = mountRef.current;
     if (!container) return;
 
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
     const scene = new THREE.Scene();
     sceneRef.current = scene;
 
-    const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 1000);
+    const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 1000);
     camera.position.set(0, 6.5, 9.5);
     camera.lookAt(0, 0, 0);
     cameraRef.current = camera;
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
+    const renderer = createRenderer(container);
+    const stopResize = observeResize(container, camera, renderer);
 
     // Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.95);
@@ -174,7 +123,7 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
 
         // Edge highlights
         const edGeo = new THREE.EdgesGeometry(planeGeo);
-        const edMat = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 2 });
+        const edMat = new THREE.LineBasicMaterial({ color: 0xffffff });
         mesh.add(new THREE.LineSegments(edGeo, edMat));
 
         faceMeshesGroup.add(mesh);
@@ -202,33 +151,10 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
     scene.add(particleSystem);
 
     // Drag Orbit
-    let isDragging = false;
-    let prevMouse = { x: 0, y: 0 };
-
-    const handleMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      prevMouse = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDragging) return;
-      const dx = e.clientX - prevMouse.x;
-      const dy = e.clientY - prevMouse.y;
-
+    const drag = attachDragRotate(renderer.domElement, (dx, dy) => {
       scene.rotation.y += dx * 0.008;
       scene.rotation.x += dy * 0.008;
-
-      prevMouse = { x: e.clientX, y: e.clientY };
-    };
-
-    const handleMouseUp = () => {
-      isDragging = false;
-    };
-
-    const domElem = renderer.domElement;
-    domElem.addEventListener('mousedown', handleMouseDown);
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    });
 
     // Animation loop (Auto-orbit smooth rotation)
     let animId: number;
@@ -236,7 +162,7 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
     const animate = () => {
       animId = requestAnimationFrame(animate);
 
-      if (!isDragging && faceMeshesGroupRef.current) {
+      if (!drag.isDragging() && faceMeshesGroupRef.current) {
         faceMeshesGroupRef.current.rotation.y += 0.003;
       }
 
@@ -256,27 +182,11 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
 
     animate();
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-
-    window.addEventListener('resize', handleResize);
-
     return () => {
       cancelAnimationFrame(animId);
-      domElem.removeEventListener('mousedown', handleMouseDown);
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-      window.removeEventListener('resize', handleResize);
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      renderer.dispose();
+      drag.dispose();
+      stopResize();
+      teardownRenderer(container, renderer, scene);
     };
   }, []);
 
@@ -331,6 +241,9 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
   useEffect(() => {
     if (!cameraRef.current) return;
     const cam = cameraRef.current;
+    // Dragging rotates the whole scene; undo that so "Top" and "Edge" really
+    // look straight down / edge-on at the foil plane.
+    sceneRef.current?.rotation.set(0, 0, 0);
     if (cameraMode === 'top') {
       cam.position.set(0, 11, 0.001);
       cam.lookAt(0, 0, 0);
@@ -343,23 +256,27 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
     }
   }, [cameraMode]);
 
-  // Handle Auto Collapse Timer
+  // Auto collapse: advance by elapsed time (frame-rate independent) and stop
+  // exactly at 1 so the faces never overshoot their net positions.
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isCollapsing) {
-      playCollapseSound(soundEnabled);
-      timer = setInterval(() => {
-        setCollapseProgress((prev) => {
-          if (prev >= 1) {
-            setIsCollapsing(false);
-            return 1;
-          }
-          return prev + 0.015;
-        });
-      }, 35);
-    }
-    return () => clearInterval(timer);
-  }, [isCollapsing, soundEnabled]);
+    if (!isCollapsing) return;
+    let frame: number;
+    let last = performance.now();
+    const step = (now: number) => {
+      const dt = now - last;
+      last = now;
+      const next = Math.min(1, progressRef.current + dt / COLLAPSE_DURATION_MS);
+      progressRef.current = next;
+      setCollapseProgress(next);
+      if (next >= 1) {
+        setIsCollapsing(false);
+        return;
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [isCollapsing]);
 
   const selectedFaceInfo = DICE_FACES.find((f) => f.id === selectedFaceId);
 
@@ -403,10 +320,17 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
+                  if (isCollapsing) {
+                    setIsCollapsing(false);
+                    playClickSound(soundEnabled);
+                    return;
+                  }
                   if (collapseProgress >= 1) {
+                    progressRef.current = 0;
                     setCollapseProgress(0);
                   }
-                  setIsCollapsing(!isCollapsing);
+                  setIsCollapsing(true);
+                  playCollapseSound(soundEnabled);
                 }}
                 className="px-3.5 py-1 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 transition-all"
               >
@@ -474,7 +398,7 @@ export const Demo2_DimensionalCollapse: React.FC<Demo2Props> = ({ soundEnabled }
       {/* Control Sidebar & 3D Standard Reference */}
       <div className="w-full lg:w-[320px] flex flex-col gap-4">
         {/* MANDATORY Standard 3D Reference Cube */}
-        <ReferenceCube3D highlightFace={selectedFaceId === 'f6' ? 'back' : selectedFaceId === 'f1' ? 'front' : null} title="3D Dice Geometry Reference" />
+        <ReferenceCube3D highlightFace={selectedFaceId ? REFERENCE_FACE[selectedFaceId] ?? null : null} title="3D Dice Geometry Reference" />
 
         {/* Controls */}
         <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-3.5 backdrop-blur flex flex-col gap-3 shadow-lg">

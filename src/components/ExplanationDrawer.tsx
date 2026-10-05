@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { DemoId } from '../types';
 import { X, BookOpen } from 'lucide-react';
 
@@ -13,11 +13,28 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
   onClose,
   currentDemo,
 }) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/70 backdrop-blur-sm transition-opacity">
-      <div className="w-full max-w-lg bg-slate-950 border-l border-cyan-500/30 p-6 overflow-y-auto h-full flex flex-col gap-6 shadow-2xl text-slate-200 font-sans">
+    <div
+      className="fixed inset-0 z-[60] flex justify-end bg-black/70 backdrop-blur-sm transition-opacity"
+      onClick={onClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Dimensional physics guide"
+        onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-lg bg-slate-950 border-l border-cyan-500/30 p-6 overflow-y-auto h-full flex flex-col gap-6 shadow-2xl text-slate-200 font-sans">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-slate-800 pb-4">
           <div className="flex items-center gap-2">
@@ -28,6 +45,7 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close guide"
             className="p-1.5 rounded-lg bg-slate-900 border border-slate-800 text-slate-400 hover:text-white"
           >
             <X className="w-5 h-5" />
@@ -58,6 +76,9 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
               </p>
               <p className="text-slate-300">
                 However, a 4D observer situated along the 4th spatial axis W looks DOWN at 3D space. The 2D faces of a 3D cube do NOT block light rays traveling along the W axis! Thus, <strong className="text-cyan-300">all 6 faces AND the internal core are visible simultaneously</strong>.
+              </p>
+              <p className="text-slate-300">
+                The W-offset slider can only hint at this inside a 3D screen: it pulls the faces apart (an exploded view) so nothing blocks anything else, which is what the 4D observer gets without moving anything.
               </p>
             </div>
           </div>
@@ -92,7 +113,7 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
           <div className="flex flex-col gap-4 text-xs leading-relaxed">
             <div className="p-3 rounded-xl bg-sky-950/40 border border-sky-500/30">
               <h3 className="font-mono font-bold text-sky-300 text-sm mb-1">
-                Demo 3: Curvature Propulsion Drive
+                Demo 4: Curvature Propulsion Drive
               </h3>
               <p className="text-slate-300">
                 Spacetime metric contraction and expanding trailing wakes.
@@ -117,7 +138,7 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
           <div className="flex flex-col gap-4 text-xs leading-relaxed">
             <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-500/30">
               <h3 className="font-mono font-bold text-purple-300 text-sm mb-1">
-                Demo 4: 1D → 5D Dimensional Evolution
+                Demo 3: 1D → 5D Dimensional Evolution
               </h3>
               <p className="text-slate-300">
                 Observing how spatial enclosure, vision, and geometry transform step-by-step from 1D to 5D.
@@ -132,8 +153,17 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
                 • <strong>1D Line</strong>: Objects exist as points along a single line. Movement is restricted along X.<br />
                 • <strong>2D Flatland</strong>: Space expands to width and height. A closed perimeter line forms a complete 2D boundary.<br />
                 • <strong>3D Cube</strong>: Volume is added (Z axis). Front opaque surfaces occlude the interior and back faces.<br />
-                • <strong>4D Tesseract</strong>: Adding the 4th spatial axis (W) allows light to bypass 3D surfaces. All 6 faces + inner core are visible simultaneously.<br />
-                • <strong>5D Calabi-Yau</strong>: Micro-manifolds fold extra dimensions into quantum string vibrations and harmonic fields.
+                • <strong>4D Tesseract</strong>: Sweeping the cube along a 4th axis (W) gives 16 vertices, 32 edges and 8 cubic cells. Light travelling along W bypasses 3D surfaces, so all 6 faces and the inner core are visible at once.<br />
+                • <strong>5D Penteract</strong>: Sweeping again along a 5th axis (V) gives 32 vertices and 80 edges, drawn by projecting 5D → 4D → 3D.
+              </p>
+              <h4 className="font-mono font-semibold uppercase text-[11px] tracking-wider text-purple-400">
+                2. Reading the Projection
+              </h4>
+              <p className="text-slate-300">
+                A 3D drawing of a cube on paper shrinks the far face. Here the far copy along W is drawn smaller in the same way, which is why the tesseract looks like a cube inside a cube. With hyper-rotation on, the shape turns in the XW and ZW planes, and the inner and outer cells seem to swap places through each other. Nothing actually passes through anything in 4D: the overlap only exists in the 3D shadow.
+              </p>
+              <p className="text-slate-300">
+                These flat, open extra axes are geometry, not string theory: string theory's extra dimensions are curled up into tiny 6-dimensional Calabi-Yau spaces.
               </p>
             </div>
           </div>

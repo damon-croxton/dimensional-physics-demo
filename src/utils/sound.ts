@@ -13,8 +13,21 @@ function getAudioContext(): AudioContext {
   return audioCtx;
 }
 
+// Range inputs fire onChange on every pixel of a drag. Without a floor between
+// repeats, each event spawns its own oscillator and they pile into a buzz.
+const MIN_REPEAT_MS = 60;
+const lastPlayed: Record<string, number> = {};
+
+function shouldPlay(enabled: boolean, key: string): boolean {
+  if (!enabled) return false;
+  const now = performance.now();
+  if (now - (lastPlayed[key] ?? -Infinity) < MIN_REPEAT_MS) return false;
+  lastPlayed[key] = now;
+  return true;
+}
+
 export function playClickSound(enabled: boolean = true) {
-  if (!enabled) return;
+  if (!shouldPlay(enabled, 'click')) return;
   try {
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
@@ -38,7 +51,7 @@ export function playClickSound(enabled: boolean = true) {
 }
 
 export function playShiftSound(enabled: boolean = true, freq = 300) {
-  if (!enabled) return;
+  if (!shouldPlay(enabled, 'shift')) return;
   try {
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
@@ -62,7 +75,7 @@ export function playShiftSound(enabled: boolean = true, freq = 300) {
 }
 
 export function playEtchSound(enabled: boolean = true) {
-  if (!enabled) return;
+  if (!shouldPlay(enabled, 'etch')) return;
   try {
     const ctx = getAudioContext();
     const osc = ctx.createOscillator();
@@ -86,7 +99,7 @@ export function playEtchSound(enabled: boolean = true) {
 }
 
 export function playCollapseSound(enabled: boolean = true) {
-  if (!enabled) return;
+  if (!shouldPlay(enabled, 'collapse')) return;
   try {
     const ctx = getAudioContext();
     // Sub-bass sweep
