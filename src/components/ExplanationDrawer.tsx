@@ -151,19 +151,22 @@ export const ExplanationDrawer: React.FC<ExplanationDrawerProps> = ({
               </h4>
               <p className="text-slate-300">
                 • <strong>1D Line</strong>: Objects exist as points along a single line. Movement is restricted along X.<br />
-                • <strong>2D Flatland</strong>: Space expands to width and height. A closed perimeter line forms a complete 2D boundary.<br />
-                • <strong>3D Cube</strong>: Volume is added (Z axis). Front opaque surfaces occlude the interior and back faces.<br />
-                • <strong>4D Tesseract</strong>: Sweeping the cube along a 4th axis (W) gives 16 vertices, 32 edges and 8 cubic cells. Light travelling along W bypasses 3D surfaces, so all 6 faces and the inner core are visible at once.<br />
-                • <strong>5D Penteract</strong>: Sweeping again along a 5th axis (V) gives 32 vertices and 80 edges, drawn by projecting 5D → 4D → 3D.
+                • <strong>2D Flatland</strong>: Sweeping the line along Y gives a square. A closed perimeter line forms a complete 2D boundary.<br />
+                • <strong>3D Cube</strong>: Sweeping the square along Z gives a cube. Front opaque surfaces occlude the interior and back faces.<br />
+                • <strong>4D Sight</strong>: The same cube seen from a 4th direction, W. Nothing in 3D sits between the viewer and any part of it, so all 6 faces and the core are visible at once (the Demo 1 view).<br />
+                • <strong>5D Sight</strong>: The same idea one level up. A tesseract is bounded by 8 cubes; a 5D viewer sees all 8 at once.
               </p>
               <h4 className="font-mono font-semibold uppercase text-[11px] tracking-wider text-purple-400">
-                2. Reading the Projection
+                2. The Pattern
               </h4>
               <p className="text-slate-300">
-                A 3D drawing of a cube on paper shrinks the far face. Here the far copy along W is drawn smaller in the same way, which is why the tesseract looks like a cube inside a cube. With hyper-rotation on, the shape turns in the XW and ZW planes, and the inner and outer cells seem to swap places through each other. Nothing actually passes through anything in 4D: the overlap only exists in the 3D shadow.
+                From inside its own space you can see at most half of a shape's sides and none of its inside: one end of a line, two edges of a square, three faces of a cube, four cubes of a tesseract. From one dimension up, every side and the whole inside are in view together.
               </p>
               <p className="text-slate-300">
-                These flat, open extra axes are geometry, not string theory: string theory's extra dimensions are curled up into tiny 6-dimensional Calabi-Yau spaces.
+                On a 3D screen we can only hint at this, so the 4D and 5D views pull the pieces apart: the cube's faces in 4D, and the tesseract's 8 cubes in 5D, laid out as its net (the "Dalí cross"), just as Demo 2 lays a cube out as 6 squares.
+              </p>
+              <p className="text-slate-300">
+                These flat, open extra directions are geometry, not string theory: string theory's extra dimensions are curled up into tiny 6-dimensional Calabi-Yau spaces.
               </p>
             </div>
           </div>
